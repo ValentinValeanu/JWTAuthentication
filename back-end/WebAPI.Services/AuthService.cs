@@ -1,4 +1,8 @@
-﻿using WebAPI.Data;
+﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using WebAPI.Data;
+using WebAPI.Data.Entities;
+using WebAPI.Services.Helpers;
 using WebAPI.Services.Interfaces;
 using WebAPI.Services.Models;
 
@@ -6,25 +10,50 @@ namespace WebAPI.Services
 {
     public class AuthService : IAuthService
     {
-        private readonly SandboxContext devSandboxContext;
+        private readonly SandboxContext _sandboxContext;
 
         public AuthService()
         {
-            this.devSandboxContext = new SandboxContext();
+            _sandboxContext = new SandboxContext();
         }
 
-        public Task LoginAsync(UserLoginDTO userLoginDTO)
+        public async Task<UserLoginOutput?> LoginAsync(UserLoginInput userLoginDTO)
         {
-            Console.WriteLine($"Email: {userLoginDTO.Email}");
-            Console.WriteLine($"Password: {userLoginDTO.Password}");
+            var passwordHasher = new PasswordHasher<UserLoginInput>();
 
-            return Task.CompletedTask;
+            var user = await _sandboxContext.Users.FirstOrDefaultAsync(u => u.Email == userLoginDTO.Email);
+
+            if (user == null)
+            {
+                return null;
+            }
+
+            var result = passwordHasher.VerifyHashedPassword(userLoginDTO, user.Password, userLoginDTO.Password);
+
+            if (result == PasswordVerificationResult.Success)
+            {
+                return new UserLoginOutput(
+                    User: new UserDTO(user.FirstName, user.LastName, user.Email), 
+                    AccessToken: JwtTokenGenerator.Generate(user.Id));
+            }
+
+            return null;
         }
 
-        public Task SignupAsync(UserSignupDTO userSignupDTO)
+        public async Task SignupAsync(UserSignupInput userSignupDTO)
         {
-            return Task.CompletedTask;
-            //return devSandboxContext.Users.AddAsync(...);
+            var passwordHasher = new PasswordHasher<UserSignupInput>();
+
+            await _sandboxContext.Users.AddAsync(new User
+            {
+                Email = userSignupDTO.Email,
+                LastName = userSignupDTO.LastName,
+                FirstName = userSignupDTO.FirstName,
+                Password = passwordHasher.HashPassword(userSignupDTO, userSignupDTO.Password),
+                BirthDate = Convert.ToDateTime(userSignupDTO.BirthDate)
+            });
+
+            await _sandboxContext.SaveChangesAsync();
         }
     }
 }

@@ -4,8 +4,8 @@ namespace WebAPI.Services.Interfaces
 {
     public interface IAuthService
     {
-        Task LoginAsync(UserLoginDTO userLoginDTO);
+        Task<UserLoginOutput?> LoginAsync(UserLoginInput userLoginDTO);
 
-        Task SignupAsync(UserSignupDTO userSignupDTO);
+        Task SignupAsync(UserSignupInput userSignupDTO);
     }
 }
