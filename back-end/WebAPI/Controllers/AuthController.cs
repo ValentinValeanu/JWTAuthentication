@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using WebAPI.Services.Interfaces;
 using WebAPI.Services.Models;
 
@@ -12,8 +13,11 @@ namespace WebAPI.Controllers
 
         private readonly ILogger<AuthController> _logger = logger;
 
+        private const string RefreshTokenCookieKey = "refreshToken";
+
+
         [HttpPost("login")]
-        public async Task<ActionResult<UserLoginOutput>> LoginAsync(UserLoginInput userLoginInput)
+        public async Task<ActionResult<UserLoginPartialOutput>> LoginAsync(UserLoginInput userLoginInput)
         {
             _logger.LogInformation("Login requested for user {UserEmail}.", userLoginInput.Email);
 
@@ -26,7 +30,40 @@ namespace WebAPI.Controllers
                 return Unauthorized();
             }
 
-            return Ok(userLoginOutput);
+            this.StoreRefreshTokenCookie(userLoginOutput.RefreshToken);
+
+            return Ok(userLoginOutput.UserLoginPartialOutput);
+        }
+
+        [HttpPost("refresh-token")]
+        public async Task<ActionResult<RefreshTokenOutput>> RefreshTokenAsync()
+        {
+            if (!Request.Cookies.TryGetValue(RefreshTokenCookieKey, out var refreshToken))
+            {
+                _logger.LogWarning("No refresh token provided, unauthorized.");
+
+                return Unauthorized("No refresh token provided.");
+            }
+
+            var tokenUserID = await _authService.ValidateRefreshToken(refreshToken);
+
+            if (tokenUserID == null || !int.TryParse(tokenUserID, out var userID))
+            {
+                _logger.LogWarning("Invalid refresh token, unauthorized.");
+
+                return Unauthorized("Invalid refresh token.");
+            }
+
+            _logger.LogInformation("Refreshing token for user {UserID}.", userID);
+
+            var newAccessToken = await _authService.GenerateAccessTokenAsync(userID);
+
+            var newRefreshToken = await _authService.GenerateRefreshTokenAsync(userID);
+
+            // Rotate the refresh token
+            this.StoreRefreshTokenCookie(newRefreshToken);
+
+            return Ok(new RefreshTokenOutput { AccessToken = newAccessToken });
         }
 
         [HttpPost("signup")]
@@ -37,6 +74,17 @@ namespace WebAPI.Controllers
             await _authService.SignupAsync(userSignupInput);
 
             return NoContent();
+        }
+
+        private void StoreRefreshTokenCookie(string refreshToken)
+        {
+            Response.Cookies.Append(RefreshTokenCookieKey, refreshToken, new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true, // Only HTTPS
+                SameSite = SameSiteMode.Strict, // Prevent CSRF
+                Expires = DateTimeOffset.UtcNow.AddHours(2) // expires in 2 hours
+            });
         }
     }
 }
