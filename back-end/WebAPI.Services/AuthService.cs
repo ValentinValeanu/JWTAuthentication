@@ -8,14 +8,9 @@ using WebAPI.Services.Models;
 
 namespace WebAPI.Services
 {
-    public class AuthService : IAuthService
+    public class AuthService(SandboxContext sandboxContext) : IAuthService
     {
-        private readonly SandboxContext _sandboxContext;
-
-        public AuthService()
-        {
-            _sandboxContext = new SandboxContext();
-        }
+        private readonly SandboxContext _sandboxContext = sandboxContext;
 
         public async Task<UserLoginOutput?> LoginAsync(UserLoginInput userLoginDTO)
         {

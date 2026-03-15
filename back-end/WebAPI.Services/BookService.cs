@@ -5,14 +5,9 @@ using WebAPI.Services.Models;
 
 namespace WebAPI.Services
 {
-    public class BookService : IBookService
+    public class BookService(SandboxContext sandboxContext) : IBookService
     {
-        private readonly SandboxContext _sandboxContext;
-
-        public BookService()
-        {
-            this._sandboxContext = new SandboxContext();        
-        }
+        private readonly SandboxContext _sandboxContext = sandboxContext;
 
         public async Task<Book> CreateAsync(BookInput book)
         {

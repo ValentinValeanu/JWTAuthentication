@@ -1,6 +1,8 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using WebAPI.Data;
 using WebAPI.Services;
 using WebAPI.Services.Interfaces;
 using WebAPI.Services.Properties;
@@ -9,6 +11,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
+
+builder.Services.AddDbContext<SandboxContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddAuthentication(options =>
 {
