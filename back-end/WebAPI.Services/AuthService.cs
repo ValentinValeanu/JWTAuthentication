@@ -57,7 +57,8 @@ namespace WebAPI.Services
                 var principal = handler.ValidateToken(refreshToken, tokenValidationParameters, out var validatedToken);
 
                 if (validatedToken is JwtSecurityToken jwtToken &&
-                    jwtToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
+                    jwtToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase) &&
+                    jwtToken.Claims.FirstOrDefault(c => c.Type == "type")?.Value == JwtToken.RefreshToken.ToString())
                 {
                     // Token is valid
                     var userID = jwtToken.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub)?.Value;
@@ -81,7 +82,7 @@ namespace WebAPI.Services
         {
             var claims = new[]
             {
-                new Claim("type", "access-token"),
+                new Claim("type", JwtToken.AccessToken.ToString()),
                 new Claim(JwtRegisteredClaimNames.Sub, userID.ToString()),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
@@ -104,7 +105,7 @@ namespace WebAPI.Services
         {
             var claims = new[]
             {
-                new Claim("type", "refresh-token"),
+                new Claim("type", JwtToken.RefreshToken.ToString()),
                 new Claim(JwtRegisteredClaimNames.Sub, userID.ToString()),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
