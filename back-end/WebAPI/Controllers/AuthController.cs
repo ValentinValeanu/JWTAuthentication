@@ -1,5 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using WebAPI.Services.Interfaces;
 using WebAPI.Services.Models;
 
@@ -7,25 +6,21 @@ namespace WebAPI.Controllers
 {
     [ApiController]
     [Route("api/auth")]
-    public class AuthController(IAuthService authService, ILogger<AuthController> logger) : ControllerBase
+    public class AuthController(IAuthService authService, IUserService userService,  ILogger<AuthController> logger) : ControllerBase
     {
-        private readonly IAuthService _authService = authService;
-
-        private readonly ILogger<AuthController> _logger = logger;
-
         private const string RefreshTokenCookieKey = "refreshToken";
 
 
         [HttpPost("login")]
         public async Task<ActionResult<UserLoginPartialOutput>> LoginAsync(UserLoginInput userLoginInput)
         {
-            _logger.LogInformation("Login requested for user {UserEmail}.", userLoginInput.Email);
+            logger.LogInformation("Login requested for user {UserEmail}.", userLoginInput.Email);
 
-            var userLoginOutput = await _authService.LoginAsync(userLoginInput);
+            var userLoginOutput = await authService.LoginAsync(userLoginInput);
 
             if (userLoginOutput == null)
             {
-                _logger.LogWarning("Login for user {UserEmail} failed, unauthorized.", userLoginInput.Email);
+                logger.LogWarning("Login for user {UserEmail} failed, unauthorized.", userLoginInput.Email);
 
                 return Unauthorized();
             }
@@ -40,25 +35,34 @@ namespace WebAPI.Controllers
         {
             if (!Request.Cookies.TryGetValue(RefreshTokenCookieKey, out var refreshToken))
             {
-                _logger.LogWarning("No refresh token provided, unauthorized.");
+                logger.LogWarning("No refresh token provided, unauthorized.");
 
                 return Unauthorized("No refresh token provided.");
             }
 
-            var tokenUserID = await _authService.ValidateRefreshToken(refreshToken);
+            var userId = authService.ValidateRefreshToken(refreshToken);
 
-            if (tokenUserID == null || !int.TryParse(tokenUserID, out var userID))
+            if (userId == null)
             {
-                _logger.LogWarning("Invalid refresh token, unauthorized.");
+                logger.LogWarning("Invalid refresh token, unauthorized.");
 
                 return Unauthorized("Invalid refresh token.");
             }
 
-            _logger.LogInformation("Refreshing token for user {UserID}.", userID);
+            logger.LogInformation("Refreshing token for user {UserId}.", userId.Value);
 
-            var newAccessToken = await _authService.GenerateAccessTokenAsync(userID);
+            var user = await userService.GetUserAsync(userId.Value);
 
-            var newRefreshToken = await _authService.GenerateRefreshTokenAsync(userID);
+            if (user == null)
+            {
+                logger.LogWarning("User cannot be found {userId}.", userId.Value);
+
+                return Unauthorized("Invalid user.");
+            }
+
+            var newAccessToken = await authService.GenerateAccessTokenAsync(user);
+
+            var newRefreshToken = await authService.GenerateRefreshTokenAsync(user);
 
             // Rotate the refresh token
             this.StoreRefreshTokenCookie(newRefreshToken);
@@ -69,9 +73,14 @@ namespace WebAPI.Controllers
         [HttpPost("signup")]
         public async Task<IActionResult> SignupAsync(UserSignupInput userSignupInput)
         {
-            _logger.LogInformation("Signup requested for user {UserEmail}.", userSignupInput.Email);
+            logger.LogInformation("Signup requested for user {UserEmail}.", userSignupInput.Email);
 
-            await _authService.SignupAsync(userSignupInput);
+            var isSuccessful = await authService.SignupAsync(userSignupInput);
+
+            if (!isSuccessful)
+            {
+                return BadRequest();
+            }
 
             return NoContent();
         }

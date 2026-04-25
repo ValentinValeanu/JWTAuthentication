@@ -1,4 +1,5 @@
-﻿using WebAPI.Services.Models;
+﻿using WebAPI.Data.Entities;
+using WebAPI.Services.Models;
 
 namespace WebAPI.Services.Interfaces
 {
@@ -6,12 +7,12 @@ namespace WebAPI.Services.Interfaces
     {
         Task<UserLoginOutput?> LoginAsync(UserLoginInput userLoginDTO);
 
-        Task<string?> ValidateRefreshToken(string refreshToken);
+        int? ValidateRefreshToken(string refreshToken);
 
-        Task<string> GenerateAccessTokenAsync(int userID);
+        Task<string> GenerateAccessTokenAsync(User user);
 
-        Task<string> GenerateRefreshTokenAsync(int userID);
+        Task<string> GenerateRefreshTokenAsync(User user);
 
-        Task SignupAsync(UserSignupInput userSignupDTO);
+        Task<bool> SignupAsync(UserSignupInput userSignupDTO);
     }
 }

@@ -3,7 +3,6 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.IdentityModel.Tokens;
 using WebAPI.Data;
 using WebAPI.Data.Entities;
@@ -15,11 +14,11 @@ namespace WebAPI.Services
 {
     public class AuthService(SandboxContext sandboxContext) : IAuthService
     {
-        private readonly SandboxContext _sandboxContext = sandboxContext;
-
         public async Task<UserLoginOutput?> LoginAsync(UserLoginInput userLoginDTO)
         {
-            var user = await _sandboxContext.Users.FirstOrDefaultAsync(u => u.Email == userLoginDTO.Email);
+            var user = await sandboxContext.Users.AsNoTracking()
+                                                 .Include(user => user.Roles)
+                                                 .FirstOrDefaultAsync(u => u.Email == userLoginDTO.Email);
 
             if (user == null)
             {
@@ -30,83 +29,35 @@ namespace WebAPI.Services
 
             var result = passwordHasher.VerifyHashedPassword(userLoginDTO, user.Password, userLoginDTO.Password);
 
-            if (result == PasswordVerificationResult.Success)
+            if (result != PasswordVerificationResult.Success)
             {
-                var userData = new UserDTO(user.FirstName, user.LastName, user.Email);
-
-                var accessToken = await GenerateAccessTokenAsync(user.Id);
-
-                var refreshToken = await GenerateRefreshTokenAsync(user.Id);
-
-                return new UserLoginOutput(
-                    UserLoginPartialOutput: new UserLoginPartialOutput(userData, accessToken),
-                    RefreshToken: refreshToken);
+                return null;
             }
 
-            return null;
+            var accessToken = await GenerateAccessTokenAsync(user);
+
+            var refreshToken = await GenerateRefreshTokenAsync(user);
+
+            var userData = new UserDTO(user.FirstName, user.LastName, user.Email);
+
+            return new UserLoginOutput(
+                UserLoginPartialOutput: new UserLoginPartialOutput(userData, accessToken),
+                RefreshToken: refreshToken);
         }
 
-        public Task<string?> ValidateRefreshToken(string refreshToken) => Task.Run(() =>
-        {
-            var handler = new JwtSecurityTokenHandler();
+        public Task<string> GenerateAccessTokenAsync(User user) =>
+            GenerateTokenAsync(user, JwtToken.AccessToken, DateTime.Now.AddMinutes(15));
 
-            var tokenValidationParameters = JwtSettings.GetTokenValidationParameters();
+        public Task<string> GenerateRefreshTokenAsync(User user) =>
+            GenerateTokenAsync(user, JwtToken.RefreshToken, DateTime.Now.AddHours(3));
 
-            try
-            {
-                var principal = handler.ValidateToken(refreshToken, tokenValidationParameters, out var validatedToken);
-
-                if (validatedToken is JwtSecurityToken jwtToken &&
-                    jwtToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase) &&
-                    jwtToken.Claims.FirstOrDefault(c => c.Type == "type")?.Value == JwtToken.RefreshToken.ToString())
-                {
-                    // Token is valid
-                    var userID = jwtToken.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub)?.Value;
-
-                    return userID;
-                }
-            }
-            catch (SecurityTokenExpiredException)
-            {
-                //Token expired
-            }
-            catch (SecurityTokenException)
-            {
-                //Invalid token
-            }
-
-            return null;
-        });
-
-        public Task<string> GenerateAccessTokenAsync(int userID) => Task.Run(() =>
+        public Task<string> GenerateTokenAsync(User user, JwtToken jwtToken, DateTime expiration) => Task.Run(() =>
         {
             var claims = new[]
             {
-                new Claim("type", JwtToken.AccessToken.ToString()),
-                new Claim(JwtRegisteredClaimNames.Sub, userID.ToString()),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-            };
-
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtSettings.SecretKey));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken(
-                issuer: JwtSettings.Issuer,
-                audience: JwtSettings.Audience,
-                claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(15),
-                signingCredentials: creds
-            );
-
-            return new JwtSecurityTokenHandler().WriteToken(token);
-        });
-
-        public Task<string> GenerateRefreshTokenAsync(int userID) => Task.Run(() =>
-        {
-            var claims = new[]
-            {
-                new Claim("type", JwtToken.RefreshToken.ToString()),
-                new Claim(JwtRegisteredClaimNames.Sub, userID.ToString()),
+                new Claim("type", jwtToken.ToString()),
+                new Claim(ClaimTypes.Role, string.Join(",", user.Roles.Select(role => role.Name))),
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
 
@@ -118,27 +69,87 @@ namespace WebAPI.Services
                 audience: JwtSettings.Audience,
                 claims: claims,
                 notBefore: DateTime.UtcNow,
-                expires: DateTime.UtcNow.AddHours(1),
+                expires: expiration,
                 signingCredentials: creds
             );
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         });
 
-        public async Task SignupAsync(UserSignupInput userSignupDTO)
+        public int? ValidateRefreshToken(string refreshToken)
+        {
+            var handler = new JwtSecurityTokenHandler();
+
+            var tokenValidationParameters = JwtSettings.GetTokenValidationParameters();
+
+            try
+            {
+                var principal = handler.ValidateToken(refreshToken, tokenValidationParameters, out var validatedToken);
+
+                if (validatedToken is not JwtSecurityToken jwtToken)
+                {
+                    return null;
+                }
+
+                var isCorrectAlgorithm =
+                    jwtToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase);
+
+                var isRefreshToken =
+                    jwtToken.Claims.FirstOrDefault(c => c.Type == "type")?.Value == JwtToken.RefreshToken.ToString();
+
+                if (!isCorrectAlgorithm || !isRefreshToken)
+                {
+                    return null;
+                }
+
+                // Token is valid
+                var userId = jwtToken.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub)?.Value;
+
+                if (!int.TryParse(userId, out var intUserID))
+                {
+                    return null;
+                }
+
+                return intUserID;
+            }
+            catch (SecurityTokenExpiredException)
+            {
+                //Token expired
+            }
+            catch (SecurityTokenException)
+            {
+                //Invalid token
+            }
+
+            return null;
+        }
+
+        public async Task<bool> SignupAsync(UserSignupInput userSignupDTO)
         {
             var passwordHasher = new PasswordHasher<UserSignupInput>();
 
-            await _sandboxContext.Users.AddAsync(new User
+            var studentRole = 
+                await sandboxContext.Roles.AsNoTracking()
+                                          .FirstOrDefaultAsync(role => role.Name == UserRole.Student.ToString());
+
+            if (studentRole == null)
+            {
+                return false;
+            }
+
+            await sandboxContext.Users.AddAsync(new User
             {
                 Email = userSignupDTO.Email,
                 LastName = userSignupDTO.LastName,
                 FirstName = userSignupDTO.FirstName,
                 Password = passwordHasher.HashPassword(userSignupDTO, userSignupDTO.Password),
-                BirthDate = Convert.ToDateTime(userSignupDTO.BirthDate)
+                BirthDate = Convert.ToDateTime(userSignupDTO.BirthDate),
+                Roles = [studentRole]
             });
 
-            await _sandboxContext.SaveChangesAsync();
+            await sandboxContext.SaveChangesAsync();
+
+            return true;
         }
     }
 }

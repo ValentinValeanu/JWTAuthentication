@@ -2,7 +2,7 @@
 
 namespace WebAPI.Services.Properties
 {
-    internal enum JwtToken
+    public enum JwtToken
     {
         [Description("access-token")]
         AccessToken,
